@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tempo
+  namespace: argocd
+spec:
+  destination:
+    namespace: monitoring
+    server: "https://kubernetes.default.svc"
+  syncPolicy:
+    automated:
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - Replace=true
+  project: default
+  source: 
+    path: monitoring/tempo
+    repoURL: "https://github.com/lordagam/Project-DevOps-devops-prod.online.git" 
+    targetRevision: main

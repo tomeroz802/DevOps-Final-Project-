@@ -1,0 +1,298 @@
+name: CI-CD-Project-DevOps
+on: 
+  #schedule:
+   #- cron: '0 0 * * *'
+  push:
+### Continuous Integration (CI) - Build, Test, Push ### 
+jobs:
+ CI-Build-Test-Push:
+    runs-on: ubuntu-latest
+
+    steps:
+    # build the react-app using Docker Compose
+      - uses: actions/checkout@v2
+      - name: Build the stack
+        run: cd react-app && ls && docker-compose up --build -d 
+    # Test the URL of the build 
+      - name: Run curl Test
+        run: |
+          sudo apt-get update; sudo apt-get install -y curl && curl http://localhost:3000 && docker ps && pwd
+    # Change Image Name   
+      - name: change image name
+        run: |
+          cd /home/runner/work/Project-DevOps-devops-prod.online/ && docker tag mysql:8.0.27 lordagam/project-devops:mysql && docker tag react-app_frontend lordagam/project-devops:frontend 
+    # Docker Login    
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+            username: ${{ secrets.DOCKERHUB_USERNAME }}
+            password: ${{ secrets.DOCKERHUB_TOKEN }}
+  
+    #  Push to Docker Hub   
+    
+      - name: docker push
+        run: docker push lordagam/project-devops:mysql && docker push lordagam/project-devops:frontend
+    
+    # Slack Notification
+      - uses: actions/checkout@master
+      - name: Slack Notification 
+        uses: bryannice/gitactions-slack-notification@2.0.0
+        env:
+         SLACK_INCOMING_WEBHOOK: ${{ secrets.SLACK_INCOMING_WEBHOOK }}
+         SLACK_MESSAGE: 'DevOps pipeline''CI project successfully completed '
+         SLACK_TITLE: 'CI project successfully completed '
+
+
+# Security Check - Snyk
+ Snyk-security:
+    needs: CI-Build-Test-Push
+    runs-on: ubuntu-latest
+    steps:          
+      - name: Snyk Infrastructure as Code scan
+        id: snyk-iac-scan
+        uses: Gershon-A/snyk-iac-code-security-checks@v1.0.1
+        continue-on-error: true
+        with:
+          SNYK_TOKEN: ${{ secrets.SNYKTOKEN }}
+          SEVERITY_THRESHOLD: "critical"
+          FILE: "example-*"
+          update_pr_with_scan_results: true
+
+### Continuous Deployment (CD) - EKS, Cert-Manager, Ingress-Nginx, ArgoDC, monitoring, react-app  ###
+
+ CD-Terraform:
+    needs: Snyk-security
+    runs-on: self-hosted    
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - name: pwd
+      run: pwd 
+
+# Pull the latest changes from the GitHub repository.
+
+    - name: pull the Repo 
+      run: git pull https://github.com/lordagam/Project-DevOps-devops-prod.online.git && ls -alh
+
+    - name: Go To Dir-File 
+      run: cd /home/ec2-user/Project-DevOps-devops-prod.online-actions-runner/_work/Project-DevOps-devops-prod.online/Terraform
+   
+    # Terraform Init
+    
+    - name: Terraform Init
+      run: cd .. && cd Terraform && ls -alh && terraform init
+   
+    # Terraform Validate
+    
+    - name: Terraform Validate
+      run: cd .. && cd Terraform && ls -alh && terraform validate
+ 
+    # Terraform Plan
+
+    - name: Terraform Plan
+      run: cd .. && cd Terraform && ls -alh && terraform plan
+      
+    # Terraform Apply
+
+    - name: Terraform Apply
+      run: cd .. && cd Terraform && ls -alh && terraform apply -auto-approve
+   
+    # File Info form terraform (We need cluster name for eks kubeconfig  )
+
+    - name: LooK for terraform.tfstate.backup
+      run: cd .. && cd Terraform && ls -alh && sleep 15
+
+   # Output The Cluster Name
+
+    - name: output cluster name
+      run: cd .. && cd Terraform && ls -alh && cat terraform.tfstate.backup | grep -A2 'cluster_name' | grep 'value' | awk -F'"' '{print $4}'
+       
+   # aws eks kubeconfig - to Start with EKS
+
+    - name: aws eks kubeconfig 
+      run: cd .. && cd Terraform && ls -alh && aws eks --region eu-west-3 update-kubeconfig --name $(cat terraform.tfstate.backup | grep -A2 'cluster_name' | grep 'value' | awk -F'"' '{print $4}')
+      
+   # Create Namespace Cert-Manager 
+     
+    - name: namespace-cert-manager
+      run: kubectl create namespace cert-manager || true
+    
+   # Create Namespace Ingress-Nginx 
+
+    - name: namespace-ingress-nginx
+      run: kubectl create namespace ingress-nginx || true
+  
+    - name: delete react-app
+      run: kubectl delete namespace react-app  || true
+
+    - name: namespace-react-app
+      run: kubectl create namespace react-app
+
+    - name: delete namespace-argocd
+      run: kubectl delete namespace argocd  || true
+      
+    - name: delete monitoring
+      run: kubectl delete namespace monitoring  || true
+
+    - name: namespace-monitoring
+      run: kubectl create namespace monitoring  || true
+    
+    - name: namespace-argocd
+      run: kubectl create namespace argocd || true  
+
+   
+    - name: namespace-app-demo
+      run: kubectl delete namespace app-demo  || true 
+    
+    - name: namespace-app-demo
+      run: kubectl create namespace app-demo || true
+    
+    # install Ingress
+    - name: install_Ingress
+      run: kubectl apply -n ingress-nginx  -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.2/deploy/static/provider/aws/deploy.yaml
+
+    # Install Cert Manager
+  
+    - name: install_cert_manager
+      run: cd .. && cd letsencrypt && ls -alh && chmod +x ./install_cert_manager.sh && ./install_cert_manager.sh
+        
+    # Install Argo-cd
+  
+    - name: install argo-cd
+      run: cd .. && cd letsencrypt && ls -alh && kubectl apply -n argocd -f install.yaml && sleep 30
+
+    # Pass Of Argo-cd
+
+    - name: Pass argocd
+      run: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+
+    # SSL Of ingress-nginx
+
+    - name: apply ingress-nginx
+      run: cd .. && cd ingress-nginx && ls -alh && kubectl apply -f ingress-nginx-ingress1.yaml
+      
+    - name: install issue-prod-ingress-nginx
+      run: cd .. && cd ingress-nginx && ls -alh  && kubectl apply -f issue-prod-ingress-nginx.yaml
+
+    - name: apply ingress-nginx
+      run: cd .. && cd ingress-nginx && ls -alh && kubectl apply -f ingress-nginx-ingress.yaml
+
+    # SSL Of argo-ingress
+     
+    - name: apply argo-ingress
+      run: cd .. && cd letsencrypt && ls -alh && kubectl apply -f issue-stage-argocd.yaml
+      #  && kubectl apply -f argo-ingress1.yaml
+      
+    - name: install issue-prod-argocd
+      run: cd .. && cd letsencrypt && ls -alh  && kubectl apply -f issue-prod-argocd.yaml
+
+    - name: apply argo-ingress
+      run: cd .. && cd letsencrypt && ls -alh && kubectl apply -f argo-ingress.yaml
+    
+     
+    # Show Infomtion  
+    
+    - name:  get ingress ns argocd
+      run: kubectl get ingress -n argocd
+    
+    - name: show certificate
+      run: kubectl get certificate -A
+        
+    - name: show Node
+      run: kubectl get node
+    
+    - name: show Pods
+      run: kubectl get pods -A
+
+    - name: show svc
+      run: kubectl get svc -A
+
+    # Deploy Grafana
+
+    - name: Deploy Grafana
+      run: cd .. && cd monitoring && cd grafana-deployment && cd argocd && kubectl apply -f grafana-argo-deploy.yaml
+   
+    #- name: apply Grafana-ingress
+    #  run: cd .. && cd monitoring && cd grafana-deployment && ls -alh && kubectl apply -f ingress-grafana1.yaml
+      
+    #- name: install issue-prod-Grafana
+    #  run: cd .. && cd monitoring && cd grafana-deployment && ls -alh  && kubectl apply -f issue-grafana-prod.yaml
+   
+    #- name: apply Grafana-ingress
+    #  run: cd .. && cd monitoring && cd grafana-deployment && ls -alh && kubectl apply -f ingress-grafana.yaml
+    
+    
+    #- name: install issue-prod-argocd
+    #  run: cd .. && cd monitoring && cd grafana-deployment && ls -alh  && kubectl apply -f issue-grafana-prod.yaml
+
+
+   # Deploy prometheus
+   
+    - name: Deploy prometheus
+      run: cd .. && cd monitoring && cd prometheus-deployment && cd argocd && ls -alh  && kubectl apply -f prometheus-argo-deploy.yaml
+   
+   # Deploy Loki
+      
+    - name: Deploy Loki
+      run: cd .. && cd monitoring && cd loki && cd argocd && ls -alh  && kubectl apply -f loki-argo-deploy.yaml
+
+   # Deploy mimir
+
+    - name: Deploy mimir
+      run: cd .. && cd monitoring && cd mimir && cd argocd && ls -alh  && kubectl apply -f mimir-argo-deploy.yaml
+    
+   # Deploy tempo
+    
+    - name: Deploy tempo
+      run: cd .. && cd monitoring && cd tempo && cd argocd && ls -alh  && kubectl apply -f tempo-argo-deploy.yaml
+
+   # Deploy promtail
+    
+    - name: Deploy promtail
+      run: cd .. && cd monitoring && cd promtail && cd argocd && ls -alh  && kubectl apply -f promtail-argo-deploy.yaml
+
+   # Deploy React-App
+    
+    - name: Deploy React-App
+      run: cd .. && cd react-app && ls -alh && kubectl apply -f react-app-argo-deploy.yaml
+  
+   # Deploy app-demo
+
+    - name: Deploy app-demo
+      run: cd .. && cd app-demo && cd argocd && ls -alh  && kubectl apply -f app-demo-argo-deploy.yaml
+
+
+   # Show Infomtion  
+
+    
+    - name:  get ingress ns argocd
+      run: kubectl get ingress -n argocd
+    
+    - name: show certificate
+      run: kubectl get certificate -A
+        
+    - name: show Node
+      run: kubectl get node
+    
+    - name: show Pods
+      run: kubectl get pods -A
+
+    - name: show svc
+      run: kubectl get svc -A
+
+
+ # Slack Notification    
+
+ slack-Notification:
+   name: Slack Notification 
+   needs: CD-Terraform
+   runs-on: ubuntu-latest
+   steps:
+     - uses: actions/checkout@master
+     - name: Slack Notification 
+       uses: bryannice/gitactions-slack-notification@2.0.0
+       env:
+        SLACK_INCOMING_WEBHOOK: ${{ secrets.SLACK_INCOMING_WEBHOOK }}
+        SLACK_MESSAGE: 'DevOps pipeline''CI/CD project successfully completed '
+        SLACK_TITLE: 'CI/CD project successfully completed '

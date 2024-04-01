@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+  annotations:
+    cert-manager.io/issuer: "letsencrypt-stage"
+    ingress.kubernetes.io/proxy-body-size: 100M
+    ingress.kubernetes.io/app-root: "/"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - ingress-nginx.devops-prod.online
+    secretName: letsencrypt-prod
+  rules:
+  - host: ingress-nginx.devops-prod.online
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-nginx-controller
+            port:
+              number: 80

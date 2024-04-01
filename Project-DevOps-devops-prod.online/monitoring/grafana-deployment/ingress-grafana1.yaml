@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: monitoring
+  annotations:
+    #cert-manager.io/issuer: "letsencrypt-staging"
+    ingress.kubernetes.io/proxy-body-size: 100M
+    ingress.kubernetes.io/app-root: "/"
+spec:
+  ingressClassName: nginx
+  #tls:
+  #- hosts:
+   # - grafana.tomer-aws-project.online
+    #secretName: letsencrypt-prod
+  rules:
+  - host: grafana.devops-prod.online
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana
+            port:
+              number: 3000

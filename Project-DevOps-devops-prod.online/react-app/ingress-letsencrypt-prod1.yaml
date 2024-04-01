@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1 
+kind: Ingress
+metadata:
+  name: react-app
+  annotations:
+    cert-manager.io/issuer: "letsencrypt-prod"
+
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - react-app.devops-prod.online
+    secretName: quickstart-example-tls
+  rules:
+  - host: react-app.devops-prod.online
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: react-app
+            port:
+              number: 3000

@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-demo
+  namespace: argocd
+spec:
+  destination:
+    namespace: app-demo
+    server: "https://kubernetes.default.svc"
+  syncPolicy:
+    automated:
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - Replace=true
+  project: default
+  source: 
+    path: app-demo
+    repoURL: "https://github.com/lordagam/Tomer-Joseph_project-test.git" 
+    targetRevision: main
+    #helm:
+    #  releaseName: grafana
